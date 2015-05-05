@@ -4,7 +4,7 @@ import (
 	"io"
 	"log"
 	"net/http"
-	
+
 	"github.com/gorilla/websocket"
 )
 
@@ -23,22 +23,26 @@ func handleWebSocket() {
 	ch1 := make(chan *websocket.Conn, 1)
 	ch2 := make(chan *websocket.Conn, 1)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		c, err := upgrader.Upgrade(w, r, nil)
+		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Println(err)
 			return
 		}
 		select {
-		case ch1 <- c:
-			if err := c.WriteMessage(websocket.TextMessage, []byte{'0'}); err != nil {
-				log.Fatal("WriteMessage: ", err)
+		case ch1 <- ws:
+			ws2 := <-ch2
+			if err := ws2.WriteJSON(false); err != nil {
+				log.Println(err)
+				return
 			}
-			relay(c, <-ch2)
-		case ch2 <- c:
-			if err := c.WriteMessage(websocket.TextMessage, []byte{'1'}); err != nil {
-				log.Fatal("WriteMessage: ", err)
+			relay(ws2, ws)
+		case ch2 <- ws:
+			ws1 := <-ch1
+			if err := ws1.WriteJSON(true); err != nil {
+				log.Println(err)
+				return
 			}
-			relay(c, <-ch1)
+			relay(ws1, ws)
 		}
 	})
 }
@@ -50,17 +54,21 @@ func relay(dst, src *websocket.Conn) {
 			break
 		}
 		if err != nil {
-			log.Fatal("NextReader: ", err)
+			log.Println("NextReader: ", err)
+			break
 		}
 		w, err := dst.NextWriter(messageType)
 		if err != nil {
-			log.Fatal("NextWriter: ", err)
+			log.Println("NextWriter: ", err)
+			break
 		}
 		if _, err := io.Copy(w, r); err != nil {
 			log.Println("Copy: ", err)
+			break
 		}
 		if err := w.Close(); err != nil {
-			log.Fatal("Close: ", err)
+			log.Println("Close: ", err)
+			break
 		}
 	}
 }

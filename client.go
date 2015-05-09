@@ -3,86 +3,110 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"time"
 
-	"github.com/gopherjs/websocket"
 	"github.com/gordonklaus/webrtc"
 	"honnef.co/go/js/dom"
 )
 
+var (
+	initiator bool
+	dcChan = make(chan webrtc.DataChannel)
+)
+
 func main() {
-	ws, err := websocket.Dial("ws://localhost:12345/ws")
-	chk(err)
-	// defer ws.Close()
-
-	enc := json.NewEncoder(ws)
-	dec := json.NewDecoder(ws)
-
-	var offerer bool
-	err = dec.Decode(&offerer)
-	chk(err)
-
-	cfg := webrtc.Config{func(cand webrtc.ICECandidate) {
-		err := enc.Encode(wsMessage{ICECandidate: cand})
-		chk(err)
-	}}
-	c := webrtc.NewConn(cfg)
-	go play(offerer, c.CreateDataChannel("gameState", webrtc.Negotiated(0)))
-	go negotiateSession(offerer, c, enc, dec)
+	go negotiateSession()
+	for {
+		play()
+	}
 }
 
-func negotiateSession(offerer bool, c webrtc.Conn, enc *json.Encoder, dec *json.Decoder) {
-	if offerer {
+func negotiateSession() {
+start:
+	sig := openSignallingChannel()
+	// defer ws.Close()
+
+	initiator = sig.initiator
+
+	fmt.Println("initiator:", initiator)
+
+	cfg := webrtc.Config{}
+	c := webrtc.NewConn(cfg)
+	dc := c.CreateDataChannel("gameState", webrtc.Negotiated(0))
+	dcChan <- dc
+
+	if initiator {
 		offer, err := c.CreateOffer()
 		chk(err)
 		err = c.SetLocalDescription(offer)
 		chk(err)
-		err = enc.Encode(wsMessage{SessionDescription: offer})
+		err = sig.enc.Encode(wsMessage{SessionDescription: &offer})
 		chk(err)
 	}
-
+	localICECandidates := c.ICECandidates
+	remoteICECandidates := sig.iceCandidates
+	sessionDescriptions := sig.sessionDescriptions
 	for {
-		var msg wsMessage
-		err := dec.Decode(&msg)
-		if err == io.EOF {
-			break
-		}
-		chk(err)
-		if msg.SessionDescription.Valid() {
-			fmt.Println("received", msg.SessionDescription.Type)
-			err := c.SetRemoteDescription(msg.SessionDescription)
+		select {
+		case ic := <-localICECandidates:
+			if ic == nil {
+				localICECandidates = nil
+			}
+			fmt.Println("sending", ic)
+			err := sig.enc.Encode(wsMessage{ICECandidate: ic})
 			chk(err)
-			if !offerer {
+		case ic, ok := <-remoteICECandidates:
+			if !ok {
+				remoteICECandidates = nil
+				break
+			}
+			fmt.Println("received", ic)
+			err := c.AddICECandidate(ic)
+			chk(err)
+		case sd := <-sessionDescriptions:
+			if sd.Type != webrtc.ProvisionalAnswer {
+				sessionDescriptions = nil
+			}
+			fmt.Println("received", sd.Type)
+			err := c.SetRemoteDescription(sd)
+			chk(err)
+			if !initiator {
 				answer, err := c.CreateAnswer()
 				chk(err)
 				err = c.SetLocalDescription(answer)
 				chk(err)
-				err = enc.Encode(wsMessage{SessionDescription: answer})
+				err = sig.enc.Encode(wsMessage{SessionDescription: &answer})
 				chk(err)
 			}
-		} else {
-			fmt.Println("received", msg.ICECandidate)
-			err := c.AddICECandidate(msg.ICECandidate)
-			chk(err)
+		case <-sig.closed:
+			fmt.Println("signalling channel closed")
+			dc.Close()
+			c.Close()
+			goto start
+		case state := <-c.ICEConnectionState:
+			fmt.Println("ICE connection state:", state)
+			switch {
+			case state.Completed():
+				// sig.close()
+			case state.Failed():
+				// dc.Close()
+				// c.Close()
+				// goto start
+			}
 		}
 	}
 }
 
-type wsMessage struct {
-	SessionDescription webrtc.SessionDescription
-	ICECandidate       webrtc.ICECandidate
-}
+func play() {
+	dc := <-dcChan
 
-func play(offerer bool, dc webrtc.DataChannel) {
 	var table table
 	table.reset()
 	me := &table.player1
 	you := &table.player2
-	if offerer {
+	if initiator {
 		me, you = you, me
 	}
 
@@ -91,6 +115,7 @@ func play(offerer bool, dc webrtc.DataChannel) {
 	player2 := doc.GetElementByID("player2")
 	ball := doc.GetElementByID("ball")
 	var left, right, quit bool
+	// TODO: key names not recognized on Chrome?
 	doc.AddEventListener("keydown", false, func(event dom.Event) {
 		e := event.(*dom.KeyboardEvent)
 		switch e.Key {
@@ -124,8 +149,16 @@ func play(offerer bool, dc webrtc.DataChannel) {
 			move = "right"
 			me.dx += 1
 		}
-		dc.SendString(move)
-		move = dc.Recv()
+		err := dc.SendString(move)
+		if err != nil {
+			fmt.Println("DataChannel.SendString:", err)
+			break
+		}
+		move, err = dc.Recv()
+		if err != nil {
+			fmt.Println("DataChannel.Recv:", err)
+			break
+		}
 		if move == "left" {
 			you.dx -= 1
 		}
@@ -156,7 +189,7 @@ func play(offerer bool, dc webrtc.DataChannel) {
 const (
 	fps         = 60
 	tableWidth  = 10
-	tableHeight = 16
+	tableHeight = 12
 	paddleWidth = .5
 	ballRadius  = .3
 )

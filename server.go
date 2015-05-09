@@ -19,55 +19,54 @@ func handleWebSocket() {
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	}
-
-	ch1 := make(chan *websocket.Conn, 1)
-	ch2 := make(chan *websocket.Conn, 1)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Println(err)
+			log.Println("Upgrade:", err)
 			return
 		}
-		select {
-		case ch1 <- ws:
-			ws2 := <-ch2
-			if err := ws2.WriteJSON(false); err != nil {
-				log.Println(err)
-				return
-			}
-			relay(ws2, ws)
-		case ch2 <- ws:
-			ws1 := <-ch1
-			if err := ws1.WriteJSON(true); err != nil {
-				log.Println(err)
-				return
-			}
-			relay(ws1, ws)
-		}
+		webSockets <- ws
 	})
+
+	go pairWebSockets()
 }
 
-func relay(dst, src *websocket.Conn) {
+var webSockets = make(chan *websocket.Conn)
+
+func pairWebSockets() {
+	var c1 *websocket.Conn
+	for c2 := range webSockets {
+		if err := c2.WriteJSON(c1 == nil); err != nil {
+			log.Println("WriteJSON:", err)
+			continue
+		}
+		if c1 == nil {
+			c1 = c2
+			continue
+		}
+		go copy(c1, c2)
+		go copy(c2, c1)
+		c1 = nil
+	}
+}
+
+func copy(dst, src *websocket.Conn) {
+	defer dst.Close()
 	for {
 		messageType, r, err := src.NextReader()
-		if err == io.EOF {
-			break
-		}
 		if err != nil {
-			log.Println("NextReader: ", err)
 			break
 		}
 		w, err := dst.NextWriter(messageType)
 		if err != nil {
-			log.Println("NextWriter: ", err)
 			break
 		}
 		if _, err := io.Copy(w, r); err != nil {
-			log.Println("Copy: ", err)
+			log.Println("Copy:", err)
 			break
 		}
 		if err := w.Close(); err != nil {
-			log.Println("Close: ", err)
+			log.Println("Close:", err)
 			break
 		}
 	}

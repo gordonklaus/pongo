@@ -1,5 +1,3 @@
-//+build js
-
 package main
 
 import (
@@ -8,7 +6,6 @@ import (
 	"time"
 
 	"github.com/gordonklaus/webrtc"
-	"honnef.co/go/js/dom"
 )
 
 var (
@@ -62,34 +59,19 @@ func play() {
 		me, you = you, me
 	}
 
-	doc := dom.GetWindow().Document()
-	player1 := doc.GetElementByID("player1")
-	player1left := doc.GetElementByID("player1left")
-	player1right := doc.GetElementByID("player1right")
-	player2 := doc.GetElementByID("player2")
-	player2left := doc.GetElementByID("player2left")
-	player2right := doc.GetElementByID("player2right")
-	ball := doc.GetElementByID("ball")
+	player1 := newPaddleView("1")
+	player2 := newPaddleView("2")
+	ball := newBallView()
 	var left, right stickybool
 	var quit bool
-	doc.AddEventListener("keydown", false, func(event dom.Event) {
-		e := event.(*dom.KeyboardEvent)
-		switch e.KeyCode {
+	onKey(func(e keyEvent) {
+		switch e.code {
 		case 37:
-			left.set(true)
+			left.set(e.action == keyDown)
 		case 39:
-			right.set(true)
+			right.set(e.action == keyDown)
 		case 27:
 			quit = true
-		}
-	})
-	doc.AddEventListener("keyup", false, func(event dom.Event) {
-		e := event.(*dom.KeyboardEvent)
-		switch e.KeyCode {
-		case 37:
-			left.set(false)
-		case 39:
-			right.set(false)
 		}
 	})
 
@@ -130,19 +112,10 @@ func play() {
 		table.step()
 
 		// TODO: send+recv table state, validate
-
-		player1.SetAttribute("x1", fmt.Sprintf("%vcm", table.player1.left().x))
-		player1.SetAttribute("x2", fmt.Sprintf("%vcm", table.player1.right().x))
-		player1left.SetAttribute("cx", fmt.Sprintf("%vcm", table.player1.left().x))
-		player1right.SetAttribute("cx", fmt.Sprintf("%vcm", table.player1.right().x))
-
-		player2.SetAttribute("x1", fmt.Sprintf("%vcm", table.player2.left().x))
-		player2.SetAttribute("x2", fmt.Sprintf("%vcm", table.player2.right().x))
-		player2left.SetAttribute("cx", fmt.Sprintf("%vcm", table.player2.left().x))
-		player2right.SetAttribute("cx", fmt.Sprintf("%vcm", table.player2.right().x))
-
-		ball.SetAttribute("cx", fmt.Sprintf("%vcm", table.ball.pos.x))
-		ball.SetAttribute("cy", fmt.Sprintf("%vcm", table.ball.pos.y))
+		
+		player1.update(table.player1)
+		player2.update(table.player2)
+		ball.update(table.ball)
 
 		select {
 		case <-next:

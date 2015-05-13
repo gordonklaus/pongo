@@ -26,77 +26,29 @@ func main() {
 func negotiateSession() {
 start:
 	sig := openSignallingChannel()
-	// defer ws.Close()
 
-	initiator = sig.initiator
-
+	var err error
+	initiator, err = sig.initiator()
+	if err != nil {
+		fmt.Println(err)
+		sig.close()
+		goto start
+	}
 	fmt.Println("initiator:", initiator)
 
 	cfg := webrtc.Config{}
 	c := webrtc.NewConn(cfg)
 	dc := c.CreateDataChannel("gameState", webrtc.Negotiated(0))
 	dcChan <- dc
-
-	if initiator {
-		offer, err := c.CreateOffer()
-		chk(err)
-		err = c.SetLocalDescription(offer)
-		chk(err)
-		err = sig.enc.Encode(wsMessage{SessionDescription: &offer})
-		chk(err)
+	err = c.Negotiate(initiator, sig)
+	sig.close()
+	if err != nil {
+		fmt.Println(err)
+		dc.Close()
+		c.Close()
+		goto start
 	}
-	localICECandidates := c.ICECandidates
-	remoteICECandidates := sig.iceCandidates
-	sessionDescriptions := sig.sessionDescriptions
-	for {
-		select {
-		case ic := <-localICECandidates:
-			if ic == nil {
-				localICECandidates = nil
-			}
-			fmt.Println("sending", ic)
-			err := sig.enc.Encode(wsMessage{ICECandidate: ic})
-			chk(err)
-		case ic, ok := <-remoteICECandidates:
-			if !ok {
-				remoteICECandidates = nil
-				break
-			}
-			fmt.Println("received", ic)
-			err := c.AddICECandidate(ic)
-			chk(err)
-		case sd := <-sessionDescriptions:
-			if sd.Type != webrtc.ProvisionalAnswer {
-				sessionDescriptions = nil
-			}
-			fmt.Println("received", sd.Type)
-			err := c.SetRemoteDescription(sd)
-			chk(err)
-			if !initiator {
-				answer, err := c.CreateAnswer()
-				chk(err)
-				err = c.SetLocalDescription(answer)
-				chk(err)
-				err = sig.enc.Encode(wsMessage{SessionDescription: &answer})
-				chk(err)
-			}
-		case <-sig.closed:
-			fmt.Println("signalling channel closed")
-			dc.Close()
-			c.Close()
-			goto start
-		case state := <-c.ICEConnectionState:
-			fmt.Println("ICE connection state:", state)
-			switch {
-			case state.Completed():
-				// sig.close()
-			case state.Failed():
-				// dc.Close()
-				// c.Close()
-				// goto start
-			}
-		}
-	}
+	fmt.Println("negotiation succeeded")
 }
 
 func play() {
@@ -115,24 +67,23 @@ func play() {
 	player2 := doc.GetElementByID("player2")
 	ball := doc.GetElementByID("ball")
 	var left, right, quit bool
-	// TODO: key names not recognized on Chrome?
 	doc.AddEventListener("keydown", false, func(event dom.Event) {
 		e := event.(*dom.KeyboardEvent)
-		switch e.Key {
-		case "ArrowLeft":
+		switch e.KeyCode {
+		case 37:
 			left = true
-		case "ArrowRight":
+		case 39:
 			right = true
-		case "Escape":
+		case 27:
 			quit = true
 		}
 	})
 	doc.AddEventListener("keyup", false, func(event dom.Event) {
 		e := event.(*dom.KeyboardEvent)
-		switch e.Key {
-		case "ArrowLeft":
+		switch e.KeyCode {
+		case 37:
 			left = false
-		case "ArrowRight":
+		case 39:
 			right = false
 		}
 	})

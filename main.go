@@ -88,33 +88,36 @@ func play() {
 		}
 	})
 
-	for !quit {
-		next := time.After(time.Second / fps)
+	for frame := 0; !quit; frame++ {
+		next := time.After(time.Second / framesPerSecond)
 
-		move := "nowhere"
-		if left && !right {
-			move = "left"
-			me.dx -= 1
-		}
-		if !left && right {
-			move = "right"
-			me.dx += 1
-		}
-		err := dc.SendString(move)
-		if err != nil {
-			fmt.Println("DataChannel.SendString:", err)
-			break
-		}
-		move, err = dc.Recv()
-		if err != nil {
-			fmt.Println("DataChannel.Recv:", err)
-			break
-		}
-		if move == "left" {
-			you.dx -= 1
-		}
-		if move == "right" {
-			you.dx += 1
+		if frame % framesPerControl == 0 {
+			ddx := 60.0 / controlsPerSecond
+			move := "nowhere"
+			if left && !right {
+				move = "left"
+				me.dx -= ddx
+			}
+			if !left && right {
+				move = "right"
+				me.dx += ddx
+			}
+			err := dc.SendString(move)
+			if err != nil {
+				fmt.Println("DataChannel.SendString:", err)
+				break
+			}
+			move, err = dc.Recv()
+			if err != nil {
+				fmt.Println("DataChannel.Recv:", err)
+				break
+			}
+			if move == "left" {
+				you.dx -= ddx
+			}
+			if move == "right" {
+				you.dx += ddx
+			}
 		}
 
 		table.step()
@@ -138,7 +141,10 @@ func play() {
 }
 
 const (
-	fps         = 60
+	framesPerSecond   = 60
+	controlsPerSecond = 10
+	framesPerControl  = framesPerSecond / controlsPerSecond
+
 	tableWidth  = 10
 	tableHeight = 12
 	paddleWidth = .5
@@ -161,8 +167,8 @@ func (t *table) reset() {
 func (t *table) step() {
 	t.player1.dx *= .9
 	t.player2.dx *= .9
-	t.player1.x += t.player1.dx / fps
-	t.player2.x += t.player2.dx / fps
+	t.player1.x += t.player1.dx / framesPerSecond
+	t.player2.x += t.player2.dx / framesPerSecond
 	if t.player1.x < 1 || t.player1.x > tableWidth-1 {
 		t.player1.x = math.Max(1, math.Min(t.player1.x, tableWidth-1))
 		t.player1.dx = -t.player1.dx
@@ -172,8 +178,8 @@ func (t *table) step() {
 		t.player2.dx = -t.player2.dx
 	}
 
-	t.ball.x += t.ball.dx / fps
-	t.ball.y += t.ball.dy / fps
+	t.ball.x += t.ball.dx / framesPerSecond
+	t.ball.y += t.ball.dy / framesPerSecond
 	if t.ball.x < ballRadius || t.ball.x > tableWidth-ballRadius {
 		t.ball.dx = -t.ball.dx
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gopherjs/websocket"
 	"github.com/gordonklaus/webrtc"
+	"honnef.co/go/js/dom"
 )
 
 type signallingChannel struct {
@@ -16,7 +17,8 @@ type signallingChannel struct {
 }
 
 func openSignallingChannel() *signallingChannel {
-	ws, err := websocket.Dial("ws://localhost:12345/ws")
+	loc := dom.GetWindow().Document().(dom.HTMLDocument).Location()
+	ws, err := websocket.Dial("ws://" + loc.Host + loc.Pathname + "ws")
 	chk(err)
 	s := &signallingChannel{
 		ws,

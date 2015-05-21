@@ -11,7 +11,7 @@ import (
 func main() {
 	http.Handle("/", http.FileServer(http.Dir("")))
 	handleWebSocket()
-	log.Fatal("ListenAndServe: ", http.ListenAndServe(":12345", nil))
+	log.Fatal("ListenAndServe:", http.ListenAndServe(":8080", nil))
 }
 
 func handleWebSocket() {
